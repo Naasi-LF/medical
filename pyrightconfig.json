@@ -1,0 +1,20 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": [
+    "main.py",
+    "gastric_agent",
+    "web_app.py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        ".",
+        "/home/naasi/.local/lib/python3.10/site-packages",
+        "/home/naasi/code/work_code/medical/.venv/lib/python3.10/site-packages"
+      ]
+    }
+  ],
+  "typeCheckingMode": "basic"
+}
