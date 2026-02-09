@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from openai import OpenAI
