@@ -1,84 +1,138 @@
-# Gastric Disease Web Agent (FastAPI + RAG)
+# 胃病智能问答系统 (Gastric Disease Q&A Agent)
 
-This project provides a local web intelligent agent for gastric disease Q&A with:
+基于 RAG + 图记忆 的全栈医疗问答系统，毕业设计项目。
 
-- Web crawler for gastric-related medical pages
-- RAG knowledge base (chunk + embedding + vector retrieval)
-- DeepSeek chat/reasoning model for answers
-- DashScope embedding model (Aliyun compatible mode)
-- Hallucination control through retrieval-only grounding and source citations
+## 技术栈
 
-## 1) Environment setup (uv + requirements.txt)
+| 层 | 技术 |
+|---|------|
+| 前端 | Vue 3 + Pinia + Vue Router + Vite |
+| 后端 | FastAPI (Python) |
+| 数据库 | MongoDB (Docker) |
+| 向量库 | ChromaDB (本地) |
+| LLM | DeepSeek (chat + reasoner) |
+| Embedding | 阿里 DashScope text-embedding-v3 |
 
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -U pip
-uv pip install requests beautifulsoup4 lxml trafilatura langchain langchain-community langchain-openai langchain-chroma chromadb python-dotenv basedpyright
-uv pip freeze > requirements.txt
+## 功能特性
+
+- 用户注册/登录 (JWT 认证)
+- 流式对话 (支持 DeepSeek 思维链展示)
+- RAG 知识检索 (胃病医学文献)
+- 图记忆 (自动提取用户健康信息，量身定制回答)
+- 历史记录 (会话管理，消息持久化)
+
+## 项目结构
+
+```text
+medical/
+├── gastric_agent/          # 核心 AI 模块
+│   ├── config.py           # 环境变量配置
+│   ├── data_sources.py     # 种子站点和关键词
+│   ├── crawler.py          # 医学网页爬虫
+│   ├── kb_builder.py       # 分块 + 向量化 + Chroma 索引
+│   └── rag.py              # 检索 + DeepSeek 生成回答
+├── server/                 # FastAPI 后端
+│   ├── app.py              # 主入口, CORS, 路由注册
+│   ├── database.py         # MongoDB 连接
+│   ├── auth.py             # bcrypt 密码哈希, JWT
+│   ├── deps.py             # FastAPI 依赖 (Bearer 认证)
+│   ├── models.py           # Pydantic 请求/响应模型
+│   ├── graph_memory.py     # 图记忆 (实体提取 + 存储)
+│   └── routes/
+│       ├── auth.py         # 注册/登录接口
+│       ├── chat.py         # 会话 CRUD + 流式聊天
+│       └── memory.py       # 图记忆管理接口
+├── frontend/               # Vue 3 前端
+│   ├── src/
+│   │   ├── views/          # LoginView, ChatView
+│   │   ├── components/     # ChatSidebar, ChatMessage, MemoryPanel
+│   │   ├── stores/         # Pinia (auth, chat)
+│   │   ├── api.js          # Axios 实例 + JWT 拦截器
+│   │   └── router.js       # 路由 + 认证守卫
+│   └── vite.config.js      # /api 代理到 8000 端口
+├── .env                    # 环境变量 (不提交)
+├── .env.example            # 环境变量模板
+├── main.py                 # CLI: 爬虫 + 知识库构建
+└── requirements.txt        # Python 依赖
 ```
 
-> As requested, dependency management is done with `requirements.txt` only.
+## 快速开始
 
-## 2) Configure API keys
+### 1. 环境准备
 
-Copy env template and fill your keys:
+```bash
+# Python 虚拟环境
+uv venv && source .venv/bin/activate
+
+# 安装 Python 依赖
+pip install -r requirements.txt
+pip install pymongo "python-jose[cryptography]"
+
+# 安装前端依赖
+cd frontend && npm install && cd ..
+```
+
+### 2. 配置 API Key
 
 ```bash
 cp .env.example .env
+# 编辑 .env 填入你的 DeepSeek 和 DashScope API Key
 ```
 
-Required values:
+### 3. 启动 MongoDB
 
-- `DEEPSEEK_API_KEY`
-- `DEEPSEEK_BASE_URL` (default `https://api.deepseek.com`)
-- `DASHSCOPE_API_KEY`
-- `DASHSCOPE_BASE_URL` (default `https://dashscope.aliyuncs.com/compatible-mode/v1`)
+```bash
+docker pull mongo:7
+docker run -d --name medical-mongo -p 27017:27017 -v mongo_data:/data/db mongo:7
+```
 
-## 3) Build knowledge base
-
-Use one command (CLI):
+### 4. 构建知识库
 
 ```bash
 python main.py prepare --max-pages 120
 ```
 
-## 4) Web UI (FastAPI + simple frontend)
+### 5. 启动服务
 
-Run:
-
+终端 1 — 后端:
 ```bash
-uvicorn web_app:app --host 0.0.0.0 --port 8000
+uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
-Open: `http://127.0.0.1:8000`
+终端 2 — 前端:
+```bash
+cd frontend && npm run dev
+```
 
-The page streams `deepseek-reasoner` reasoning first, then final answer.
+打开浏览器访问: `http://localhost:5173`
 
-## Notes on hallucination reduction
+## API 接口
 
-- Retrieval-first: answer is generated from retrieved chunks only
-- If context is insufficient, agent explicitly states uncertainty
-- Output includes source URLs for auditing
-- Medical safety reminder is always included in system instruction
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/auth/register` | 注册 |
+| POST | `/api/auth/login` | 登录 (返回 JWT) |
+| GET | `/api/chat/conversations` | 获取会话列表 |
+| POST | `/api/chat/conversations` | 创建新会话 |
+| DELETE | `/api/chat/conversations/{id}` | 删除会话 |
+| GET | `/api/chat/conversations/{id}/messages` | 获取消息历史 |
+| POST | `/api/chat/stream` | 流式聊天 (NDJSON) |
+| GET | `/api/memory` | 获取用户图记忆 |
+| POST | `/api/memory/extract` | 手动提取实体 |
+| DELETE | `/api/memory/entity/{id}` | 删除实体 |
+| DELETE | `/api/memory/relation/{id}` | 删除关系 |
 
-## DashScope proxy note
+## 防幻觉机制
 
-If your shell has SOCKS proxy variables set (for example `ALL_PROXY=socks://127.0.0.1:10808`), embedding calls may fail. Run commands with proxy vars unset:
+- 检索优先: 仅基于检索到的文档片段生成回答
+- 上下文不足时, 模型明确表示不确定
+- 回答附带来源 URL 供核实
+- 系统提示词包含医疗安全提醒
+
+## 代理说明
+
+如果终端配置了 SOCKS 代理, embedding 调用可能失败。取消代理后运行:
 
 ```bash
 env -u ALL_PROXY -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy python main.py prepare --max-pages 120
-```
-
-## Project structure
-
-```text
-gastric_agent/
-  config.py        # env loading and API config
-  data_sources.py  # seed sites and gastric keywords
-  crawler.py       # domain-limited medical crawler
-  kb_builder.py    # chunking + embeddings + Chroma index
-  rag.py           # retrieval + DeepSeek answer generation
-web_app.py         # FastAPI backend
-web/index.html     # minimal frontend
 ```

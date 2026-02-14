@@ -55,6 +55,12 @@ NON_TARGET_TERMS = {
     "gallbladder",
 }
 
+# --- Dynamic retrieval thresholds ---
+_ABS_THRESHOLD = 0.3  # Minimum absolute relevance score (filter pure noise)
+_REL_RATIO = 0.5  # Keep docs within 50% of best score
+_MIN_RESULTS = 2  # Always return at least 2 docs
+_MAX_RESULTS = 8  # Never return more than 8 docs
+
 
 @dataclass
 class QAResponse:
@@ -89,20 +95,21 @@ class GastricRAGAgent:
         on_thought: Callable[[str], None] | None = None,
         on_reasoning_token: Callable[[str], None] | None = None,
         on_token: Callable[[str], None] | None = None,
+        memory_context: str = "",
     ) -> QAResponse:
         if on_thought:
             on_thought("正在理解问题意图...")
 
         normalized_question = _normalize_question(question)
-        candidates = self.vectordb.similarity_search(
-            normalized_question, k=max(top_k * 5, 20)
+        docs_with_scores = self.vectordb.similarity_search_with_relevance_scores(
+            normalized_question, k=20
         )
         if on_thought:
-            on_thought(f"已检索到 {len(candidates)} 条候选资料，正在筛选...")
+            on_thought(f"已检索到 {len(docs_with_scores)} 条候选资料，正在筛选...")
 
-        docs = _select_relevant_docs(normalized_question, candidates, top_k)
+        docs = _select_relevant_docs(normalized_question, docs_with_scores)
         if on_thought:
-            on_thought(f"已筛选出 {len(docs)} 条高相关资料。")
+            on_thought(f"已筛选出 {len(docs)} 条高相关资料（动态阈值）。")
 
         if not docs:
             return QAResponse(
@@ -114,12 +121,10 @@ class GastricRAGAgent:
             )
 
         context_lines: list[str] = []
-        source_urls: list[str] = []
         retrieved_items: list[dict[str, str]] = []
         for i, doc in enumerate(docs, start=1):
             source = doc.metadata.get("source", "")
             title = doc.metadata.get("title", "")
-            source_urls.append(source)
             snippet = doc.page_content[:200].replace("\n", " ").strip()
             retrieved_items.append(
                 {
@@ -137,14 +142,23 @@ class GastricRAGAgent:
 
         user_prompt = (
             f"用户问题: {question}\n\n"
-            "以下是检索到的上下文:\n"
+            "以下是检索到的上下文：\n"
             + "\n\n".join(context_lines)
             + "\n\n请给出回答，依据部分必须使用[1]、[2]这种编号引用，不要使用[资料1]。"
             + "\n不要在正文重复输出URL，引用只用编号。"
         )
 
+        system_content = SYSTEM_PROMPT
+        if memory_context:
+            system_content = (
+                SYSTEM_PROMPT
+                + "\n\n"
+                + memory_context
+                + "\n请根据用户个人健康档案给出量身定制的建议。"
+            )
+
         messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=system_content),
             HumanMessage(content=user_prompt),
         ]
 
@@ -171,14 +185,16 @@ class GastricRAGAgent:
             response_text = _response_text(response.content)
             reasoning_from_model = _extract_reasoning(response)
 
-        dedup_sources = _ordered_unique_urls(source_urls)
-        references = _build_references(retrieved_items)
+        cleaned_text = _clean_output_text(response_text)
+        patched_text, references, sources = _remap_citations(
+            cleaned_text, retrieved_items
+        )
         thinking_trace = reasoning_from_model
         if think_mode and not thinking_trace:
             thinking_trace = _build_reasoning_fallback(question, retrieved_items)
         return QAResponse(
-            answer=_clean_output_text(response_text),
-            sources=dedup_sources,
+            answer=patched_text,
+            sources=sources,
             references=references,
             retrieved_items=retrieved_items,
             thinking_trace=thinking_trace,
@@ -342,31 +358,44 @@ def _normalize_question(question: str) -> str:
     return normalized
 
 
-def _select_relevant_docs(question: str, docs: list[Any], top_k: int) -> list[Any]:
+def _select_relevant_docs(
+    question: str, docs_with_scores: list[tuple[Any, float]]
+) -> list[Any]:
+    if not docs_with_scores:
+        return []
+
     question_terms = _extract_terms(question)
     is_general_gastric = bool(question_terms & GENERAL_GASTRIC_TERMS)
-    scored: list[tuple[float, Any]] = []
 
-    for idx, doc in enumerate(docs):
+    adjusted: list[tuple[float, Any]] = []
+    for doc, raw_score in docs_with_scores:
         title = str(doc.metadata.get("title", "")).lower()
-        source = str(doc.metadata.get("source", "")).lower()
         content = str(doc.page_content[:1500]).lower()
-        blob = f"{title} {source} {content}"
+        blob = f"{title} {content}"
 
-        score = max(0.0, 3.0 - idx * 0.08)
-        score += 2.0 * _term_overlap_score(question_terms, blob)
+        score = raw_score
 
         if is_general_gastric and any(term in blob for term in NON_TARGET_TERMS):
-            score -= 2.2
+            score *= 0.4
 
         if any(term in title for term in GENERAL_GASTRIC_TERMS):
-            score += 1.2
+            score = min(score * 1.15, 1.0)
 
-        if score > 0.3:
-            scored.append((score, doc))
+        adjusted.append((score, doc))
 
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [doc for _, doc in scored[:top_k]]
+    adjusted.sort(key=lambda item: item[0], reverse=True)
+
+    best_score = adjusted[0][0]
+    dynamic_threshold = max(_ABS_THRESHOLD, best_score * _REL_RATIO)
+
+    selected = [doc for score, doc in adjusted if score >= dynamic_threshold]
+
+    if len(selected) < _MIN_RESULTS:
+        selected = [doc for _, doc in adjusted[:_MIN_RESULTS]]
+    if len(selected) > _MAX_RESULTS:
+        selected = selected[:_MAX_RESULTS]
+
+    return selected
 
 
 def _extract_terms(text: str) -> set[str]:
@@ -391,31 +420,54 @@ def _term_overlap_score(question_terms: set[str], blob: str) -> float:
     return hit / max(len(question_terms), 1)
 
 
-def _ordered_unique_urls(urls: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for url in urls:
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        ordered.append(url)
-    return ordered
+def _remap_citations(
+    answer_text: str, retrieved_items: list[dict[str, str]]
+) -> tuple[str, list[dict[str, str]], list[str]]:
+    cited_indices = {int(m) for m in re.findall(r"\[(\d+)]", answer_text)}
+    if not cited_indices:
+        return answer_text, [], []
 
-
-def _build_references(retrieved_items: list[dict[str, str]]) -> list[dict[str, str]]:
-    refs: list[dict[str, str]] = []
+    url_to_best: dict[str, dict[str, str]] = {}
     for item in retrieved_items:
-        url = item.get("source", "").strip()
-        if not url:
+        idx = int(item.get("idx", "0"))
+        if idx not in cited_indices:
             continue
+        url = item.get("source", "").strip()
+        if not url or url in url_to_best:
+            continue
+        url_to_best[url] = item
+
+    old_to_new: dict[int, int] = {}
+    refs: list[dict[str, str]] = []
+    new_idx = 1
+    for item in url_to_best.values():
+        old_idx = int(item["idx"])
+        old_to_new[old_idx] = new_idx
         refs.append(
             {
-                "idx": item.get("idx", ""),
+                "idx": str(new_idx),
                 "title": item.get("title", "").strip() or "(untitled)",
-                "source": url,
+                "source": item["source"],
             }
         )
-    return refs
+        new_idx += 1
+
+    for item in retrieved_items:
+        idx = int(item.get("idx", "0"))
+        if idx in cited_indices and idx not in old_to_new:
+            url = item.get("source", "").strip()
+            for ref in refs:
+                if ref["source"] == url:
+                    old_to_new[idx] = int(ref["idx"])
+                    break
+
+    def _replace_citation(m: re.Match[str]) -> str:
+        old = int(m.group(1))
+        return f"[{old_to_new.get(old, old)}]"
+
+    patched = re.sub(r"\[(\d+)]", _replace_citation, answer_text)
+    sources = [ref["source"] for ref in refs]
+    return patched, refs, sources
 
 
 def _message_to_openai_dict(message: Any) -> ChatCompletionMessageParam:

@@ -34,8 +34,8 @@ def load_raw_docs(jsonl_path: str) -> list[Document]:
 def build_vector_db(
     jsonl_path: str,
     persist_dir: str,
-    chunk_size: int = 700,
-    chunk_overlap: int = 120,
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
 ) -> int:
     config = get_config()
     raw_docs = load_raw_docs(jsonl_path)
@@ -45,7 +45,22 @@ def build_vector_db(
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", "。", ".", "，", ",", " "],
+        separators=[
+            "\n\n",
+            "\n",
+            "。",
+            "；",
+            "！",
+            "？",
+            ". ",
+            "; ",
+            "! ",
+            "? ",
+            "，",
+            ", ",
+            " ",
+        ],
+        length_function=len,
     )
     chunks = splitter.split_documents(raw_docs)
     if not chunks:
