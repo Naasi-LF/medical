@@ -58,6 +58,52 @@ medical/
 
 ## 快速开始
 
+### 一键 Docker 部署 (推荐服务器使用)
+
+部署目标: `git pull` 后一条命令拉起前端+后端+MongoDB+Neo4j，统一通过一个端口访问。
+
+1) 准备环境变量:
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY
+# NEO4J_PASSWORD 可按需修改
+```
+
+2) 一键启动:
+
+```bash
+docker compose up -d --build
+```
+
+3) 访问服务:
+
+```text
+http://<your-server-ip>:8000
+```
+
+说明:
+- 只暴露 `8000` 端口，对外统一入口
+- 前端由 FastAPI 直接托管（容器内已构建 `frontend/dist`）
+- MongoDB 和 Neo4j 仅在 Docker 内网可见
+- 本地 `./data` 会挂载到容器 `/app/data`，用于向量库持久化
+
+常用运维命令:
+
+```bash
+# 查看状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f app
+
+# 重启更新（服务器上 git pull 后执行）
+docker compose up -d --build
+
+# 停止
+docker compose down
+```
+
 ### 1. 环境准备
 
 ```bash
