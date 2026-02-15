@@ -8,7 +8,7 @@
 |---|------|
 | 前端 | Vue 3 + Pinia + Vue Router + Vite |
 | 后端 | FastAPI (Python) |
-| 数据库 | MongoDB (Docker) |
+| 数据库 | MongoDB + Neo4j (Docker) |
 | 向量库 | ChromaDB (本地) |
 | LLM | DeepSeek (chat + reasoner) |
 | Embedding | 阿里 DashScope text-embedding-v3 |
@@ -58,99 +58,154 @@ medical/
 
 ## 快速开始
 
-### 一键 Docker 部署 (推荐服务器使用)
+本项目提供两种运行方式:
 
-部署目标: `git pull` 后一条命令拉起前端+后端+MongoDB+Neo4j，统一通过一个端口访问。
+1. 本地开发模式: 前端/后端/数据库分开启动（便于调试）
+2. 服务器部署模式: Docker 一体化启动（单端口）
 
-1) 准备环境变量:
+### 方案 A: 本地开发模式（前后端数据库分别启动）
 
-```bash
-cp .env.example .env
-# 编辑 .env 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY
-# NEO4J_PASSWORD 可按需修改
-```
-
-2) 一键启动:
-
-```bash
-docker compose up -d --build
-```
-
-3) 访问服务:
-
-```text
-http://<your-server-ip>:8000
-```
-
-说明:
-- 只暴露 `8000` 端口，对外统一入口
-- 前端由 FastAPI 直接托管（容器内已构建 `frontend/dist`）
-- MongoDB 和 Neo4j 仅在 Docker 内网可见
-- 本地 `./data` 会挂载到容器 `/app/data`，用于向量库持久化
-
-常用运维命令:
-
-```bash
-# 查看状态
-docker compose ps
-
-# 查看日志
-docker compose logs -f app
-
-# 重启更新（服务器上 git pull 后执行）
-docker compose up -d --build
-
-# 停止
-docker compose down
-```
-
-### 1. 环境准备
+#### A1. 环境准备
 
 ```bash
 # Python 虚拟环境
 uv venv && source .venv/bin/activate
 
-# 安装 Python 依赖
+# 后端依赖
 pip install -r requirements.txt
-pip install pymongo "python-jose[cryptography]"
 
-# 安装前端依赖
+# 前端依赖
 cd frontend && npm install && cd ..
 ```
 
-### 2. 配置 API Key
+#### A2. 配置环境变量
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入你的 DeepSeek 和 DashScope API Key
+# 编辑 .env 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY
 ```
 
-### 3. 启动 MongoDB
+本地开发建议保留:
+- `MONGO_URI=mongodb://localhost:27017`
+- `NEO4J_URI=bolt://localhost:7687`
+
+#### A3. 单独启动数据库
 
 ```bash
-docker pull mongo:7
-docker run -d --name medical-mongo -p 27017:27017 -v mongo_data:/data/db mongo:7
+# MongoDB
+docker run -d --name medical-mongo-local -p 27017:27017 -v mongo_data_local:/data/db mongo:7
+
+# Neo4j
+docker run -d --name medical-neo4j-local -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/medical2025 -v neo4j_data_local:/data neo4j:5
 ```
 
-### 4. 构建知识库
+#### A4. 构建向量库
 
 ```bash
 python main.py prepare --max-pages 120
 ```
 
-### 5. 启动服务
+#### A5. 分别启动后端和前端
 
-终端 1 — 后端:
+终端 1（后端）:
 ```bash
 uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
-终端 2 — 前端:
+终端 2（前端）:
 ```bash
 cd frontend && npm run dev
 ```
 
-打开浏览器访问: `http://localhost:5173`
+访问:
+- 前端: `http://localhost:5173`
+- 后端 API: `http://localhost:8000`
+
+---
+
+### 方案 B: 服务器部署模式（Docker 一体化，单端口）
+
+目标: `git pull` 后一条命令拉起前端+后端+MongoDB+Neo4j，对外只暴露 `8000`。
+
+#### B1. 首次部署
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY
+```
+
+```bash
+docker compose up -d --build
+```
+
+访问:
+```text
+http://<your-server-ip>:8000
+```
+
+#### B2. 日常更新（推荐）
+
+```bash
+bash deploy.sh
+```
+
+`deploy.sh` 会执行:
+1) `git pull`
+2) `docker compose up -d --build`
+3) `docker compose ps`
+
+也可以指定分支:
+
+```bash
+bash deploy.sh main
+```
+
+#### B3. 运维命令
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose down
+```
+
+说明:
+- 前端静态文件由 FastAPI 容器内托管（`frontend/dist`）
+- MongoDB / Neo4j 仅在 Docker 内网通信
+- 本地 `./data` 会挂载到容器 `/app/data`，用于向量库持久化
+
+---
+
+### Linux 安装 Docker + Docker Compose（Ubuntu/Debian）
+
+以下为官方仓库安装方式（推荐）。
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# 可选: 免 sudo 使用 docker
+sudo usermod -aG docker $USER
+newgrp docker
+
+docker --version
+docker compose version
+```
+
+官方文档:
+- https://docs.docker.com/engine/install/ubuntu/
+- https://docs.docker.com/compose/install/linux/
 
 ## API 接口
 
