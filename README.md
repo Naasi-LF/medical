@@ -176,9 +176,36 @@ docker compose down
 
 ---
 
-### Linux 安装 Docker + Docker Compose（Ubuntu/Debian）
+### Linux 安装 Docker + Docker Compose（官方做法）
 
-以下为官方仓库安装方式（推荐）。
+你说得对，官方没有“一条通用 Linux 命令”，而是按发行版分别给步骤。服务器常见 Debian，建议直接用 Debian 官方页。
+
+Debian（官方仓库安装）:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# 可选: 免 sudo
+sudo usermod -aG docker $USER
+newgrp docker
+
+docker --version
+docker compose version
+```
+
+Ubuntu（官方仓库安装）:
 
 ```bash
 sudo apt-get update
@@ -194,18 +221,12 @@ echo \
 
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# 可选: 免 sudo 使用 docker
-sudo usermod -aG docker $USER
-newgrp docker
-
-docker --version
-docker compose version
 ```
 
-官方文档:
-- https://docs.docker.com/engine/install/ubuntu/
-- https://docs.docker.com/compose/install/linux/
+官方文档入口:
+- Debian: https://docs.docker.com/engine/install/debian/
+- Ubuntu: https://docs.docker.com/engine/install/ubuntu/
+- Compose (Linux): https://docs.docker.com/compose/install/linux/
 
 ## API 接口
 

@@ -31,6 +31,10 @@ class ChatRequest(BaseModel):
     top_k: int = 8
 
 
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=50)
+
+
 class ConversationOut(BaseModel):
     id: str
     title: str

@@ -8,17 +8,17 @@
       <!-- Header -->
       <header class="topbar">
         <div class="topbar-left">
-          <button class="icon-btn" @click="toggleSidebar" title="切换侧栏">
+          <button class="icon-btn" @click="toggleSidebar" aria-label="切换侧栏" title="切换侧栏">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
           <span class="topbar-title">{{ currentTitle }}</span>
         </div>
         <div class="topbar-right">
-          <button class="icon-btn" @click="showMemory = !showMemory" :class="{ active: showMemory }" title="个人健康档案">
+          <button class="icon-btn" @click="showMemory = !showMemory" :class="{ active: showMemory }" aria-label="个人健康档案" title="个人健康档案">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7.5" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="7" r="2" fill="currentColor"/><path d="M5 14c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
           <span class="username">{{ auth.username }}</span>
-          <button class="icon-btn" @click="handleLogout" title="退出登录">
+          <button class="icon-btn" @click="handleLogout" aria-label="退出登录" title="退出登录">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M6.75 15.75H3.75a1.5 1.5 0 01-1.5-1.5v-10.5a1.5 1.5 0 011.5-1.5h3M12 12.75L15.75 9 12 5.25M7.5 9h8.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
@@ -37,9 +37,9 @@
           <h2>你好，有什么可以帮助你的？</h2>
           <p>我是胃病智能问答助手，可以回答关于胃炎、胃溃疡等问题</p>
           <div class="suggestions">
-            <button @click="askQuestion('肠胃炎应该吃什么药？')">肠胃炎应该吃什么药？</button>
-            <button @click="askQuestion('晚上反酸怎么缓解？')">晚上反酸怎么缓解？</button>
-            <button @click="askQuestion('胃炎和胃溃疡区别是什么？')">胃炎和胃溃疡区别是什么？</button>
+            <button @click="askQuestion('肠胃炎应该吃什么药？')" :disabled="sending">肠胃炎应该吃什么药？</button>
+            <button @click="askQuestion('晚上反酸怎么缓解？')" :disabled="sending">晚上反酸怎么缓解？</button>
+            <button @click="askQuestion('胃炎和胃溃疡区别是什么？')" :disabled="sending">胃炎和胃溃疡区别是什么？</button>
           </div>
         </div>
 
@@ -71,7 +71,7 @@
                   <span>深度思考</span>
                 </button>
               </div>
-              <button class="send-circle" @click="sendMessage" :disabled="!question.trim() || sending">
+              <button class="send-circle" @click="sendMessage" :disabled="!question.trim() || sending" aria-label="发送消息">
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 14V4M5 7.5L9 4l4 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
@@ -234,6 +234,7 @@ async function sendMessage() {
       streamingMsg.value.content += `\n[错误] ${err.message}`
     }
     chat.messages.push({ ...streamingMsg.value })
+    question.value = q
   } finally {
     streamingMsg.value = null
     sending.value = false

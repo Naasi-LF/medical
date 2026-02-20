@@ -76,7 +76,7 @@ class GastricRAGAgent:
         self.config = get_config()
         self.embeddings = OpenAIEmbeddings(
             model=self.config.dashscope_embedding_model,
-            api_key=lambda: self.config.dashscope_api_key,
+            api_key=self.config.dashscope_api_key,
             base_url=self.config.dashscope_base_url,
             check_embedding_ctx_length=False,
             chunk_size=10,
@@ -144,8 +144,7 @@ class GastricRAGAgent:
             f"用户问题: {question}\n\n"
             "以下是检索到的上下文：\n"
             + "\n\n".join(context_lines)
-            + "\n\n请给出回答，依据部分必须使用[1]、[2]这种编号引用，不要使用[资料1]。"
-            + "\n不要在正文重复输出URL，引用只用编号。"
+            + "\n\n请直接给出回答，不要在正文中使用任何编号引用（如[1]、[2]），也不要输出URL。"
         )
 
         system_content = SYSTEM_PROMPT
@@ -186,14 +185,13 @@ class GastricRAGAgent:
             reasoning_from_model = _extract_reasoning(response)
 
         cleaned_text = _clean_output_text(response_text)
-        patched_text, references, sources = _remap_citations(
-            cleaned_text, retrieved_items
-        )
+        cleaned_text = re.sub(r"\[\d+]", "", cleaned_text)
+        references, sources = _build_references(retrieved_items)
         thinking_trace = reasoning_from_model
         if think_mode and not thinking_trace:
             thinking_trace = _build_reasoning_fallback(question, retrieved_items)
         return QAResponse(
-            answer=patched_text,
+            answer=cleaned_text,
             sources=sources,
             references=references,
             retrieved_items=retrieved_items,
@@ -204,13 +202,13 @@ class GastricRAGAgent:
         if think_mode:
             return ChatOpenAI(
                 model=self.config.deepseek_reasoner_model,
-                api_key=lambda: self.config.deepseek_api_key,
+                api_key=self.config.deepseek_api_key,
                 base_url=self.config.deepseek_base_url,
             )
 
         return ChatOpenAI(
             model=self.config.deepseek_chat_model,
-            api_key=lambda: self.config.deepseek_api_key,
+            api_key=self.config.deepseek_api_key,
             base_url=self.config.deepseek_base_url,
             temperature=0.1,
         )
@@ -385,6 +383,9 @@ def _select_relevant_docs(
 
     adjusted.sort(key=lambda item: item[0], reverse=True)
 
+    if not adjusted:
+        return []
+
     best_score = adjusted[0][0]
     dynamic_threshold = max(_ABS_THRESHOLD, best_score * _REL_RATIO)
 
@@ -413,61 +414,25 @@ def _extract_terms(text: str) -> set[str]:
     return terms
 
 
-def _term_overlap_score(question_terms: set[str], blob: str) -> float:
-    if not question_terms:
-        return 0.0
-    hit = sum(1 for term in question_terms if term in blob)
-    return hit / max(len(question_terms), 1)
-
-
-def _remap_citations(
-    answer_text: str, retrieved_items: list[dict[str, str]]
-) -> tuple[str, list[dict[str, str]], list[str]]:
-    cited_indices = {int(m) for m in re.findall(r"\[(\d+)]", answer_text)}
-    if not cited_indices:
-        return answer_text, [], []
-
-    url_to_best: dict[str, dict[str, str]] = {}
-    for item in retrieved_items:
-        idx = int(item.get("idx", "0"))
-        if idx not in cited_indices:
-            continue
-        url = item.get("source", "").strip()
-        if not url or url in url_to_best:
-            continue
-        url_to_best[url] = item
-
-    old_to_new: dict[int, int] = {}
+def _build_references(
+    retrieved_items: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[str]]:
+    seen: set[str] = set()
     refs: list[dict[str, str]] = []
-    new_idx = 1
-    for item in url_to_best.values():
-        old_idx = int(item["idx"])
-        old_to_new[old_idx] = new_idx
-        refs.append(
-            {
-                "idx": str(new_idx),
-                "title": item.get("title", "").strip() or "(untitled)",
-                "source": item["source"],
-            }
-        )
-        new_idx += 1
-
+    idx = 1
     for item in retrieved_items:
-        idx = int(item.get("idx", "0"))
-        if idx in cited_indices and idx not in old_to_new:
-            url = item.get("source", "").strip()
-            for ref in refs:
-                if ref["source"] == url:
-                    old_to_new[idx] = int(ref["idx"])
-                    break
-
-    def _replace_citation(m: re.Match[str]) -> str:
-        old = int(m.group(1))
-        return f"[{old_to_new.get(old, old)}]"
-
-    patched = re.sub(r"\[(\d+)]", _replace_citation, answer_text)
+        url = item.get("source", "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        refs.append({
+            "idx": str(idx),
+            "title": item.get("title", "").strip() or "(untitled)",
+            "source": url,
+        })
+        idx += 1
     sources = [ref["source"] for ref in refs]
-    return patched, refs, sources
+    return refs, sources
 
 
 def _message_to_openai_dict(message: Any) -> ChatCompletionMessageParam:

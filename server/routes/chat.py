@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from queue import Queue
 from threading import Thread
@@ -11,6 +12,8 @@ from typing import Any, Iterator
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+
+logger = logging.getLogger(__name__)
 
 from gastric_agent.rag import GastricRAGAgent
 
@@ -21,7 +24,7 @@ from ..graph_memory import (
     extract_entities_from_text,
     save_user_memory,
 )
-from ..models import ChatRequest, ConversationOut, MessageOut
+from ..models import ChatRequest, ConversationOut, MessageOut, RenameRequest
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -64,6 +67,15 @@ def create_conversation(user_id: str = Depends(get_current_user_id)):
 def delete_conversation(conv_id: str, user_id: str = Depends(get_current_user_id)):
     conversations_col().delete_one({"_id": ObjectId(conv_id), "user_id": user_id})
     messages_col().delete_many({"conversation_id": conv_id})
+    return {"ok": True}
+
+
+@router.patch("/conversations/{conv_id}")
+def rename_conversation(conv_id: str, req: RenameRequest, user_id: str = Depends(get_current_user_id)):
+    conversations_col().update_one(
+        {"_id": ObjectId(conv_id), "user_id": user_id},
+        {"$set": {"title": req.title}},
+    )
     return {"ok": True}
 
 
@@ -118,14 +130,12 @@ def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
         }
     )
 
-    # Update conversation title if first message
-    msg_count = messages_col().count_documents({"conversation_id": conv_id})
-    if msg_count == 1:
-        title = req.question[:20] + ("..." if len(req.question) > 20 else "")
-        conversations_col().update_one(
-            {"_id": ObjectId(conv_id)},
-            {"$set": {"title": title}},
-        )
+    # Update conversation title only if still default
+    title = req.question[:20] + ("..." if len(req.question) > 20 else "")
+    conversations_col().update_one(
+        {"_id": ObjectId(conv_id), "title": "新对话"},
+        {"$set": {"title": title}},
+    )
 
     queue: Queue[dict[str, Any] | None] = Queue()
 
@@ -147,7 +157,7 @@ def chat_stream(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
                         },
                     )
             except Exception:
-                pass  # Non-critical: don't break chat if extraction fails
+                logger.warning("Memory extraction failed", exc_info=True)
 
             # Build personalized context from graph memory
             memory_context = build_memory_context(user_id)

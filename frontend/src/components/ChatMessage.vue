@@ -28,7 +28,16 @@
         </div>
 
         <!-- Answer -->
-        <div v-if="message.content" class="answer-content" v-html="renderMarkdown(message.content)"></div>
+        <div v-if="message.content" class="answer-content" v-html="renderedContent"></div>
+
+        <!-- Copy button -->
+        <div v-if="message.content && !streaming" class="action-bar">
+          <button class="copy-btn" @click="copyAnswer" aria-label="复制回答">
+            <svg v-if="!copied" width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="4.5" y="4.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M9.5 4.5V3a1.5 1.5 0 00-1.5-1.5H3A1.5 1.5 0 001.5 3v5A1.5 1.5 0 003 9.5h1.5" stroke="currentColor" stroke-width="1.2"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7.5l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>{{ copied ? '已复制' : '复制' }}</span>
+          </button>
+        </div>
 
         <!-- References -->
         <div v-if="message.references && message.references.length" class="references">
@@ -42,12 +51,15 @@
           </div>
         </div>
       </div>
+
+      <!-- Timestamp -->
+      <div v-if="message.created_at" class="msg-time">{{ formatTime(message.created_at) }}</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { marked } from 'marked'
 
 marked.setOptions({
@@ -61,9 +73,23 @@ const props = defineProps({
 })
 
 const showThinking = ref(false)
+const copied = ref(false)
 
-function renderMarkdown(text) {
-  return marked.parse(text)
+const renderedContent = computed(() => {
+  return props.message.content ? marked.parse(props.message.content) : ''
+})
+
+function copyAnswer() {
+  navigator.clipboard.writeText(props.message.content).then(() => {
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  })
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
@@ -333,4 +359,31 @@ function renderMarkdown(text) {
 }
 
 .ref-link:hover { text-decoration: underline; }
+
+/* Action bar */
+.action-bar {
+  margin-top: 8px;
+}
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.copy-btn:hover { background: rgba(0,0,0,0.05); color: var(--text); }
+
+/* Timestamp */
+.msg-time {
+  font-size: 11px;
+  color: #bbb;
+  margin-top: 4px;
+}
+
+.message.user .msg-time { text-align: right; }
 </style>

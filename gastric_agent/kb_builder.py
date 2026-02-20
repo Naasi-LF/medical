@@ -34,7 +34,7 @@ def load_raw_docs(jsonl_path: str) -> list[Document]:
 def build_vector_db(
     jsonl_path: str,
     persist_dir: str,
-    chunk_size: int = 512,
+    chunk_size: int = 700,
     chunk_overlap: int = 64,
 ) -> int:
     config = get_config()
@@ -68,7 +68,7 @@ def build_vector_db(
 
     embeddings = OpenAIEmbeddings(
         model=config.dashscope_embedding_model,
-        api_key=lambda: config.dashscope_api_key,
+        api_key=config.dashscope_api_key,
         base_url=config.dashscope_base_url,
         check_embedding_ctx_length=False,
         chunk_size=10,
